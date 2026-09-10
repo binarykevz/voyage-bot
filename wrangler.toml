@@ -1,0 +1,7 @@
+name = "telegram-media-bot"
+main = "src/index.ts"
+compatibility_date = "2024-05-29"
+
+# Secrets will be set via CLI (do not hardcode them here)
+# TELEGRAM_BOT_TOKEN
+# MEDIA_API_KEY
