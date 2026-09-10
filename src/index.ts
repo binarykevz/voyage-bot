@@ -1,4 +1,4 @@
-import { webhookCallback } from "grammy/webhook";
+import { webhookCallback } from "grammy";
 import { createBot } from "./bot";
 import { Env } from "./env";
 
@@ -10,7 +10,7 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
 
-    // Optional: Health check endpoint for monitoring
+    // Optional: Health check endpoint for monitoring platforms
     if (request.method === "GET" && url.pathname === "/health") {
       return new Response("OK", { status: 200 });
     }
@@ -19,7 +19,8 @@ export default {
     const bot = createBot(env);
 
     // Create webhook handler optimized for Cloudflare Workers
-    const handleUpdate = webhookCallback(bot, "cloudflare-modern");
+    // Note: "cloudflare-mod" is the correct adapter string per grammY docs
+    const handleUpdate = webhookCallback(bot, "cloudflare-mod");
 
     return handleUpdate(request);
   },
