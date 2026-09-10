@@ -120,7 +120,7 @@ export function createBot(env: Env) {
       formData.append("country", country);
 
       // 6. Upload to the target API
-      const apiResponse = await fetch("https://media-api.you.workers.dev/api/media", {
+      const apiResponse = await fetch("https://media-api.markmykevin.workers.dev/api/media", {
         method: "POST",
         headers: {
           "x-api-key": env.MEDIA_API_KEY,
