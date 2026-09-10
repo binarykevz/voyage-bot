@@ -3,7 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2024-05-29"
 
 services = [
-  { binding = "MEDIA_API", service = "https://media-api.markmykevin.workers.dev/" }
+  { binding = "MEDIA_API", service = "media-api" }
 ]
 # Secrets will be set via CLI (do not hardcode them here)
 # TELEGRAM_BOT_TOKEN
