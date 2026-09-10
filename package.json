@@ -1,6 +1,28 @@
 {
+  "name": "voyage-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless Telegram media upload bot for Cloudflare Workers",
+  "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
-  }
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "grammy": "^1.27.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240620.0",
+    "typescript": "^5.5.2",
+    "wrangler": "^3.62.0"
+  },
+  "keywords": [
+    "telegram-bot",
+    "cloudflare-workers",
+    "serverless",
+    "grammy"
+  ],
+  "author": "",
+  "license": "MIT"
 }
