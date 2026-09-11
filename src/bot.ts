@@ -1,11 +1,24 @@
-import { Bot, Context } from "grammy";
+import { Bot, Context, UserFromGetMe } from "grammy";
 import { Env } from "./env";
 
 export type BotContext = Context & { env: Env };
 
-export function createBot(env: Env) {
-  const bot = new Bot<BotContext>(env.TELEGRAM_BOT_TOKEN);
+export function createBot(env: Env, botInfo?: UserFromGetMe) {
+  const bot = new Bot<BotContext>(env.TELEGRAM_BOT_TOKEN, botInfo ? { botInfo } : undefined);
 
+  // ➕ NEW: Start command to show instructions
+  bot.command("start", async (ctx) => {
+    await ctx.reply(
+      "🤖 **Media Upload Bot**\n\n" +
+      "1️⃣ *Upload:* Reply to any media with:\n" +
+      "`/reply Title | Description | Country`\n\n" +
+      "2️⃣ *Delete:* Remove media using its ID:\n" +
+      "`/delete <id>`",
+      { parse_mode: "Markdown" }
+    );
+  });
+
+  // ⬆️ EXISTING: Upload command
   bot.command("reply", async (ctx) => {
     const replyMessage = ctx.message?.reply_to_message;
 
@@ -16,7 +29,6 @@ export function createBot(env: Env) {
       );
     }
 
-    // 1. Extract file metadata
     let fileId = "";
     let mediaType: "image" | "video" | "document" | null = null;
     let originalFileName = "";
@@ -38,7 +50,6 @@ export function createBot(env: Env) {
       return ctx.reply("❌ The replied message is not a valid image, video, or document.");
     }
 
-    // 2. Parse arguments: <title> | <description> | <country>
     const text = ctx.message?.text || "";
     const args = text.replace(/^\/reply\s*/i, "").trim();
     const parts = args.split("|").map((p) => p.trim());
@@ -54,100 +65,75 @@ export function createBot(env: Env) {
     }
 
     const [title, description, country] = parts;
-
-    // 3. Acknowledge immediately to prevent Telegram timeout
     const processingMsg = await ctx.reply("⏳ Fetching media and uploading. Please wait...");
 
     try {
-      // 4. Fetch file metadata and download directly into memory
       const file = await ctx.api.getFile(fileId);
-      if (!file.file_path) {
-        throw new Error("Could not retrieve file path from Telegram");
-      }
+      if (!file.file_path) throw new Error("Could not retrieve file path from Telegram");
 
       const tgUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
       const tgResponse = await fetch(tgUrl);
       
-      if (!tgResponse.ok) {
-        throw new Error(`Failed to download media from Telegram: ${tgResponse.statusText}`);
-      }
+      if (!tgResponse.ok) throw new Error(`Failed to download media: ${tgResponse.statusText}`);
 
-      // 👇 CRITICAL FIX FOR CLOUDFLARE WORKERS 👇
-      // Get raw binary data as ArrayBuffer to avoid Node.js fs dependencies
       const arrayBuffer = await tgResponse.arrayBuffer();
 
-      // 👇 ROBUST MIME TYPE RESOLUTION 👇
       let mimeType = tgResponse.headers.get("Content-Type")?.split(";")[0].trim() || "";
 
       if (!mimeType || mimeType === "application/octet-stream") {
-        const docName = originalFileName || "";
-        const ext = docName.split(".").pop()?.toLowerCase();
+        const ext = (originalFileName || "").split(".").pop()?.toLowerCase();
         if (ext === "png") mimeType = "image/png";
         else if (ext === "webp") mimeType = "image/webp";
         else if (ext === "gif") mimeType = "image/gif";
         else if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
         else if (ext === "mp4") mimeType = "video/mp4";
         else if (ext === "mov") mimeType = "video/quicktime";
-        else if (ext === "pdf") mimeType = "application/pdf";
       }
 
-      // Final fallback based on detected media type
       if (!mimeType || mimeType === "application/octet-stream") {
         mimeType = mediaType === "image" ? "image/jpeg" : "video/mp4";
       }
 
-      // Determine correct file extension based on resolved MIME type
       let extension = "jpg";
       if (mimeType.includes("png")) extension = "png";
       else if (mimeType.includes("webp")) extension = "webp";
       else if (mimeType.includes("gif")) extension = "gif";
       else if (mimeType.includes("mp4")) extension = "mp4";
       else if (mimeType.includes("quicktime")) extension = "mov";
-      else if (mimeType.includes("pdf")) extension = "pdf";
 
       const fileName = originalFileName || `upload.${extension}`;
-
-      // 👇 FORCE CORRECT MIME TYPE IN BLOB 👇
-      // When using tgResponse.blob(), Cloudflare might default to application/octet-stream.
-      // Creating a new Blob from the arrayBuffer forces the correct MIME type.
       const typedBlob = new Blob([arrayBuffer], { type: mimeType });
 
-      // 5. Prepare FormData for the target API
       const formData = new FormData();
       formData.append("file", typedBlob, fileName);
       formData.append("title", title);
       formData.append("description", description);
       formData.append("country", country);
 
-      // 6. Upload to the target API
-      const apiResponse = await env.MEDIA_API.fetch("https://internal-worker/api/media", {
-  method: "POST",
-  headers: {
-    "x-api-key": env.MEDIA_API_KEY,
-  },
-  body: formData,
-});
+      // Service Binding fetch for upload
+      const apiResponse = await env.MEDIA_API.fetch("https://internal/api/media", {
+        method: "POST",
+        headers: {
+          "x-api-key": env.MEDIA_API_KEY,
+        },
+        body: formData,
+      });
 
       const status = apiResponse.status;
       const responseText = await apiResponse.text();
 
-      // 7. Update the user with the actual status
       if (apiResponse.ok) {
         await ctx.api.editMessageText(
           ctx.chat.id,
           processingMsg.message_id,
-          `✅ **Upload Successful!**\n` +
-          `**Status:** \`${status}\`\n` +
-          `**Response:**\n\`\`\`json\n${responseText}\n\`\`\``,
+          `✅ **Upload Successful!**\n**Status:** \`${status}\`\n**Response:**\n\`\`\`json\n${responseText}\n\`\`\``,
           { parse_mode: "Markdown" }
         );
       } else {
         await ctx.api.editMessageText(
           ctx.chat.id,
           processingMsg.message_id,
-          `❌ **Upload Failed!**\n` +
-          `**Status:** \`${status}\`\n` +
-          `**Response:**\n\`\`\`json\n${responseText}\n\`\`\``,
+          `❌ **Upload Failed!**\n**Status:** \`${status}\`\n**Response:**\n\`\`\`json\n${responseText}\n\`\`\``,
           { parse_mode: "Markdown" }
         );
       }
@@ -158,6 +144,65 @@ export function createBot(env: Env) {
         ctx.chat.id,
         processingMsg.message_id,
         `⚠️ An error occurred during upload:\n\`${error.message}\``,
+        { parse_mode: "Markdown" }
+      );
+    }
+  });
+
+  // ➕ NEW: Delete command
+  bot.command("delete", async (ctx) => {
+    const args = ctx.message?.text?.split(/\s+/);
+    if (!args || args.length < 2) {
+      return ctx.reply(
+        "❌ **Usage:** `/delete <media_id>`\n\n" +
+        "💡 *Example:*\n" +
+        "`/delete 12345`",
+        { parse_mode: "Markdown" }
+      );
+    }
+
+    const mediaId = args[1];
+    const processingMsg = await ctx.reply(`🔄 Attempting to delete media with ID: \`${mediaId}\`...`, { parse_mode: "Markdown" });
+
+    try {
+      // ⚠️ NOTE: Assuming your API uses DELETE /api/media/:id
+      // If your API uses separate endpoints like /api/images/:id and /api/videos/:id, 
+      // you may need to adjust the URL below or add fallback logic.
+      const apiResponse = await env.MEDIA_API.fetch(`https://internal/api/media/${mediaId}`, {
+        method: "DELETE",
+        headers: {
+          "x-api-key": env.MEDIA_API_KEY,
+        },
+      });
+
+      const status = apiResponse.status;
+      const responseText = await apiResponse.text();
+
+      if (apiResponse.ok) {
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          processingMsg.message_id,
+          `✅ **Successfully deleted!**\n` +
+          `**Status:** \`${status}\`\n` +
+          `**Response:** \`${responseText}\``,
+          { parse_mode: "Markdown" }
+        );
+      } else {
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          processingMsg.message_id,
+          `❌ **Failed to delete.**\n` +
+          `**Status:** \`${status}\`\n` +
+          `**Response:** \`${responseText}\``,
+          { parse_mode: "Markdown" }
+        );
+      }
+    } catch (error: any) {
+      console.error("Delete error:", error);
+      await ctx.api.editMessageText(
+        ctx.chat.id,
+        processingMsg.message_id,
+        `⚠️ An error occurred during deletion:\n\`${error.message}\``,
         { parse_mode: "Markdown" }
       );
     }
